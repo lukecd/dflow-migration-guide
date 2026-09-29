@@ -1,9 +1,7 @@
 # OKX -> DFlow Migration Guide
 
 This guide describes how to migrate swap code from OKX-style quote/swap integrations to DFlow.
-Field names here match OKX's current DEX Aggregator API (v6) — v5 used `chainId` and `slippage`
-instead of `chainIndex` and `slippagePercent`, but v6 has been out since September 2025, so this
-guide targets it directly rather than covering both.
+Field names here match OKX's current DEX Aggregator API (v6).
 
 ## Related Files
 
