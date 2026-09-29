@@ -1,6 +1,7 @@
 # OKX -> DFlow Migration Guide
 
 This guide describes how to migrate swap code from OKX-style quote/swap integrations to DFlow.
+Field names here match OKX's current DEX Aggregator API (v6).
 
 ## Related Files
 
@@ -11,7 +12,7 @@ This guide describes how to migrate swap code from OKX-style quote/swap integrat
 
 ### OKX-style source flow
 
-1. Request quote/route using OKX fields like `fromTokenAddress`, `toTokenAddress`, `amount`, `userWalletAddress`, and the Solana chain selector.
+1. Request quote/route using OKX fields like `fromTokenAddress`, `toTokenAddress`, `amount`, `userWalletAddress`, and `chainIndex`.
 2. Build and sign the returned swap payload.
 3. Execute and track status using provider-specific `swap`/`execute`/history endpoints.
 
@@ -36,8 +37,8 @@ This guide describes how to migrate swap code from OKX-style quote/swap integrat
 | Output token    | `toTokenAddress`         | `outputMint`             |
 | Amount          | `amount`                 | `amount`                 |
 | Swapper wallet field | `userWalletAddress`  | `userPublicKey`          |
-| Slippage field  | `slippage`               | `slippageBps`            |
-| Chain selectors | `chainId` / `chainIndex` | `none` (Solana-only API) |
+| Slippage field  | `slippagePercent`        | `slippageBps`            |
+| Chain selector  | `chainIndex`             | `none` (Solana-only API) |
 
 `slippageBps` is optional on DFlow — it defaults to `"auto"` and determines slippage tolerance
 itself if omitted. Forwarding a converted value from the OKX-style source is only necessary if
@@ -62,7 +63,7 @@ submit it to your own Solana RPC and poll for confirmation yourself.
 3. Replace `fromTokenAddress` with `inputMint`.
 4. Replace `toTokenAddress` with `outputMint`.
 5. Replace `userWalletAddress` with `userPublicKey`.
-6. Replace `slippage` with `slippageBps` — convert percentage to basis points (`0.5` = 0.5% becomes `50`).
+6. Replace `slippagePercent` with `slippageBps` — convert percentage to basis points (`0.5` = 0.5% becomes `50`).
 7. Sign the returned transaction — `VersionedTransaction` for v0 (what you get if
    `transactionVersion` is omitted), or `@solana/kit` if you pass `transactionVersion=v1`.
 8. Replace provider execute/status calls with your own RPC submission (`sendRawTransaction` for v0,
@@ -91,8 +92,10 @@ submit it to your own Solana RPC and poll for confirmation yourself.
 
 ## Common migration mistakes
 
-- Keeping `chainId`/`chainIndex` in request builders after moving to DFlow Solana APIs.
-- Forgetting to convert `slippage` semantics to `slippageBps` when you do forward an explicit value.
+- Keeping `chainIndex` in request builders after moving to DFlow Solana APIs (DFlow is Solana-only
+  and has no chain-selector field).
+- Forgetting to convert `slippagePercent` semantics to `slippageBps` when you do forward an
+  explicit value.
 - Assuming DFlow requires `slippageBps` on every request — it's optional and defaults to `"auto"`.
 - Mixing decimal token amounts with atomic units.
 - Forgetting to convert `feePercent` (a percentage) to `platformFeeBps` (basis points) — `"1.5"`

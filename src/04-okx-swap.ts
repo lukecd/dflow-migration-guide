@@ -14,14 +14,14 @@ const DFLOW_TRADE_API_URL = process.env.DFLOW_TRADE_API_URL ?? "https://dev-quot
 const DFLOW_API_KEY = process.env.DFLOW_API_KEY;
 const EXPLORER_URL = process.env.EXPLORER_URL ?? "https://orb.helius.dev/tx";
 
-// "OKX-shaped" request fields.
+// "OKX-shaped" request fields, matching OKX's current DEX Aggregator API (v6).
 type OkxSwapRequest = {
-  chainId?: string;
+  chainIndex?: string;
   fromTokenAddress: string;
   toTokenAddress: string;
   amount: number;
   userWalletAddress: string;
-  slippage: number; // 0.5 means 0.5%
+  slippagePercent: number; // 0.5 means 0.5%
 };
 
 type DFlowOrderResponse = {
@@ -66,7 +66,7 @@ function okxToDflowRequest(input: OkxSwapRequest): {
     outputMint: input.toTokenAddress,
     amount: input.amount,
     userPublicKey: input.userWalletAddress,
-    slippageBps: Math.round(input.slippage * 100),
+    slippageBps: Math.round(input.slippagePercent * 100),
   };
 }
 
@@ -116,12 +116,12 @@ async function main() {
   const keypair = getKeypair(runMode);
 
   const okxShapedInput: OkxSwapRequest = {
-    chainId: process.env.OKX_CHAIN_ID ?? "501", // kept for source-shape parity; not used by DFlow
+    chainIndex: process.env.OKX_CHAIN_INDEX ?? "501", // kept for source-shape parity; not used by DFlow
     fromTokenAddress: process.env.INPUT_MINT ?? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
     toTokenAddress: process.env.OUTPUT_MINT ?? "So11111111111111111111111111111111111111112", // SOL
     amount: Number(process.env.INPUT_AMOUNT ?? "100000"), // 0.1 USDC (6 decimals)
     userWalletAddress: keypair.publicKey.toBase58(),
-    slippage: Number(process.env.OKX_SLIPPAGE_PERCENT ?? "0.5"),
+    slippagePercent: Number(process.env.OKX_SLIPPAGE_PERCENT ?? "0.5"),
   };
 
   console.log("OKX -> DFlow swap config:");
