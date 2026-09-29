@@ -49,5 +49,5 @@ npm run okx:live
 ## OKX -> DFlow
 
 - Guide: [docs/okx-to-dflow-migration-guide.md](docs/okx-to-dflow-migration-guide.md)
-- Key difference: OKX is typically chain-agnostic/provider-specific (`chainId`/`userWalletAddress` patterns), while DFlow is Solana-native (`inputMint`, `outputMint`, `userPublicKey`).
+- Key difference: OKX is typically chain-agnostic/provider-specific (`chainIndex`/`userWalletAddress` patterns), while DFlow is Solana-native (`inputMint`, `outputMint`, `userPublicKey`).
 
