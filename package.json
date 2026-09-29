@@ -6,16 +6,17 @@
   "scripts": {
     "jupiter:validate": "tsx src/01-jupiter-swap.ts validate",
     "jupiter:live": "tsx src/01-jupiter-swap.ts live",
-    "dflow:validate": "tsx src/02-dflow-imperative-swap.ts validate",
-    "dflow:live": "tsx src/02-dflow-imperative-swap.ts live",
-    "dflow:declarative:validate": "tsx src/03-dflow-declarative-swap.ts validate",
-    "dflow:declarative:live": "tsx src/03-dflow-declarative-swap.ts live",
+    "jupiter:v2:validate": "tsx src/03-jupiter-swap-v2.ts validate",
+    "jupiter:v2:live": "tsx src/03-jupiter-swap-v2.ts live",
+    "dflow:validate": "tsx src/02-dflow-swap.ts validate",
+    "dflow:live": "tsx src/02-dflow-swap.ts live",
     "okx:validate": "tsx src/04-okx-swap.ts validate",
     "okx:live": "tsx src/04-okx-swap.ts live",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@dflow-protocol/swap-api-utils": "^0.1.2",
+    "@solana/kit": "^8.3.0",
     "@solana/web3.js": "^1.98.4",
     "bs58": "^6.0.0",
     "dotenv": "^17.2.3"

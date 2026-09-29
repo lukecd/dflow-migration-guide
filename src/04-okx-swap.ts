@@ -1,24 +1,18 @@
 import "dotenv/config";
-import { Connection, Keypair, Transaction, VersionedTransaction } from "@solana/web3.js";
+import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 
 type RunMode = "validate" | "live";
-type DFlowMode = "imperative" | "declarative";
 
 const runMode = (process.argv[2] as RunMode | undefined) ?? "validate";
 if (runMode !== "validate" && runMode !== "live") {
   throw new Error(`Invalid run mode "${runMode}". Use "validate" or "live".`);
 }
 
-const dflowMode = (process.env.DFLOW_MODE as DFlowMode | undefined) ?? "imperative";
-if (dflowMode !== "imperative" && dflowMode !== "declarative") {
-  throw new Error(`Invalid DFLOW_MODE "${dflowMode}". Use "imperative" or "declarative".`);
-}
-
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com";
 const DFLOW_TRADE_API_URL = process.env.DFLOW_TRADE_API_URL ?? "https://dev-quote-api.dflow.net";
 const DFLOW_API_KEY = process.env.DFLOW_API_KEY;
-const HELIUS_ORB_BASE_URL = process.env.HELIUS_ORB_BASE_URL ?? "https://orb.helius.dev/tx";
+const EXPLORER_URL = process.env.EXPLORER_URL ?? "https://orb.helius.dev/tx";
 
 // "OKX-shaped" request fields.
 type OkxSwapRequest = {
@@ -32,7 +26,6 @@ type OkxSwapRequest = {
 
 type DFlowOrderResponse = {
   transaction?: string;
-  openTransaction?: string;
   requestId?: string;
   inAmount?: string;
   outAmount?: string;
@@ -42,8 +35,6 @@ type DFlowOrderResponse = {
 
 type DFlowExecuteResponse = {
   signature?: string;
-  orderAddress?: string;
-  programId?: string;
   status?: string;
   error?: string;
 };
@@ -97,8 +88,7 @@ export async function getOrder(input: OkxSwapRequest): Promise<DFlowOrderRespons
     slippageBps: String(mapped.slippageBps),
   });
 
-  const endpoint = dflowMode === "imperative" ? "/order" : "/intent";
-  const response = await fetch(`${DFLOW_TRADE_API_URL}${endpoint}?${params.toString()}`, {
+  const response = await fetch(`${DFLOW_TRADE_API_URL}/order?${params.toString()}`, {
     headers: getHeaders(false),
   });
   const data = (await response.json()) as DFlowOrderResponse;
@@ -110,34 +100,16 @@ export async function getOrder(input: OkxSwapRequest): Promise<DFlowOrderRespons
 }
 
 export async function executeOrder(params: {
-  order: DFlowOrderResponse;
   signedTransaction: string;
 }): Promise<DFlowExecuteResponse> {
-  if (dflowMode === "imperative") {
-    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-    const tx = VersionedTransaction.deserialize(Buffer.from(params.signedTransaction, "base64"));
-    const signature = await connection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-      maxRetries: 3,
-    });
-    await connection.confirmTransaction(signature, "confirmed");
-    return { signature, status: "confirmed" };
-  }
-
-  const response = await fetch(`${DFLOW_TRADE_API_URL}/submit-intent`, {
-    method: "POST",
-    headers: getHeaders(true),
-    body: JSON.stringify({
-      quoteResponse: params.order,
-      signedOpenTransaction: params.signedTransaction,
-    }),
+  const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+  const tx = VersionedTransaction.deserialize(Buffer.from(params.signedTransaction, "base64"));
+  const signature = await connection.sendRawTransaction(tx.serialize(), {
+    skipPreflight: false,
+    maxRetries: 3,
   });
-  const data = (await response.json()) as DFlowExecuteResponse;
-
-  if (!response.ok) {
-    throw new Error(`executeOrder failed (${response.status}): ${JSON.stringify(data)}`);
-  }
-  return data;
+  await connection.confirmTransaction(signature, "confirmed");
+  return { signature, status: "confirmed" };
 }
 
 async function main() {
@@ -145,16 +117,15 @@ async function main() {
 
   const okxShapedInput: OkxSwapRequest = {
     chainId: process.env.OKX_CHAIN_ID ?? "501", // kept for source-shape parity; not used by DFlow
-    fromTokenAddress: process.env.INPUT_MINT ?? "So11111111111111111111111111111111111111112",
-    toTokenAddress: process.env.OUTPUT_MINT ?? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    amount: Number(process.env.INPUT_AMOUNT ?? "100000"),
+    fromTokenAddress: process.env.INPUT_MINT ?? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+    toTokenAddress: process.env.OUTPUT_MINT ?? "So11111111111111111111111111111111111111112", // SOL
+    amount: Number(process.env.INPUT_AMOUNT ?? "100000"), // 0.1 USDC (6 decimals)
     userWalletAddress: keypair.publicKey.toBase58(),
     slippage: Number(process.env.OKX_SLIPPAGE_PERCENT ?? "0.5"),
   };
 
   console.log("OKX -> DFlow swap config:");
   console.log("  run mode:", runMode);
-  console.log("  dflow mode:", dflowMode);
   console.log("  dflow api:", DFLOW_TRADE_API_URL);
   console.log("  user wallet:", okxShapedInput.userWalletAddress);
   console.log("  amount:", okxShapedInput.amount);
@@ -167,30 +138,17 @@ async function main() {
     return;
   }
 
-  let signedTransaction: string;
-  if (dflowMode === "imperative") {
-    if (!order.transaction) {
-      throw new Error(order.error || order.errorMessage || "Missing transaction in /order response");
-    }
-    const tx = VersionedTransaction.deserialize(Buffer.from(order.transaction, "base64"));
-    tx.sign([keypair]);
-    signedTransaction = Buffer.from(tx.serialize()).toString("base64");
-  } else {
-    if (!order.openTransaction) {
-      throw new Error(order.error || order.errorMessage || "Missing openTransaction in /intent response");
-    }
-    const tx = Transaction.from(Buffer.from(order.openTransaction, "base64"));
-    tx.sign(keypair);
-    signedTransaction = Buffer.from(tx.serialize()).toString("base64");
+  if (!order.transaction) {
+    throw new Error(order.error || order.errorMessage || "Missing transaction in /order response");
   }
+  const tx = VersionedTransaction.deserialize(Buffer.from(order.transaction, "base64"));
+  tx.sign([keypair]);
+  const signedTransaction = Buffer.from(tx.serialize()).toString("base64");
 
-  const result = await executeOrder({
-    order,
-    signedTransaction,
-  });
+  const result = await executeOrder({ signedTransaction });
   console.log("Execute result:", result);
   if (result.signature) {
-    console.log("View tx on Helius Orb:", `${HELIUS_ORB_BASE_URL}/${result.signature}`);
+    console.log("View tx:", `${EXPLORER_URL}/${result.signature}`);
   }
 }
 

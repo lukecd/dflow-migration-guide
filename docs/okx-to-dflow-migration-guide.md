@@ -5,8 +5,7 @@ This guide describes how to migrate swap code from OKX-style quote/swap integrat
 ## Related Files
 
 - OKX-shaped adapter swap: `src/04-okx-swap.ts`
-- DFlow imperative swap: `src/02-dflow-imperative-swap.ts`
-- DFlow declarative swap: `src/03-dflow-declarative-swap.ts`
+- DFlow swap: `src/02-dflow-swap.ts`
 
 ## TL; DR Flows
 
@@ -16,61 +15,85 @@ This guide describes how to migrate swap code from OKX-style quote/swap integrat
 2. Build and sign the returned swap payload.
 3. Execute and track status using provider-specific `swap`/`execute`/history endpoints.
 
-### DFlow [Imperative Trade](https://pond.dflow.net/learn/imperative-trades)
+### DFlow
 
-1. `GET /order` with `inputMint`, `outputMint`, `amount`, `userPublicKey`, and `slippageBps`.
-2. Deserialize and sign the returned `transaction` locally.
-3. Broadcast and confirm via your own `Solana RPC` (`sendRawTransaction` + confirm).
-
-### DFlow [Declarative Trade](https://pond.dflow.net/learn/declarative-trades)
-
-1. `GET /intent` with `inputMint`, `outputMint`, `amount`, `userPublicKey`, and `slippageBps`.
-2. Deserialize and sign the returned `openTransaction` locally.
-3. `POST /submit-intent` with `quoteResponse` + `signedOpenTransaction`, then track order lifecycle.
+1. `GET /order` with `inputMint`, `outputMint`, `amount`, and `userPublicKey`. `slippageBps` is
+   optional and defaults to `"auto"` — DFlow determines slippage tolerance itself unless you pass
+   an explicit integer (basis points) to take manual control.
+2. Deserialize and sign the returned `transaction` locally (`@solana/web3.js` for v0, what you get
+   if `transactionVersion` is omitted; `@solana/kit` if you pass `transactionVersion=v1`).
+3. Broadcast it via your own Solana RPC and poll for confirmation yourself.
 
 ## Code Migration
 
 ## Parameter mapping
 
-### `getOrder` inputs
+### Requesting a quote
 
-| Concept         | OKX-style source         | DFlow Imperative         | DFlow Declarative        |
-| --------------- | ------------------------ | ------------------------ | ------------------------ |
-| Input token     | `fromTokenAddress`       | `inputMint`              | `inputMint`              |
-| Output token    | `toTokenAddress`         | `outputMint`             | `outputMint`             |
-| Amount          | `amount`                 | `amount`                 | `amount`                 |
-| User key field  | `userWalletAddress`      | `userPublicKey`          | `userPublicKey`          |
-| Slippage field  | `slippage`               | `slippageBps`            | `slippageBps`            |
-| Chain selectors | `chainId` / `chainIndex` | `none` (Solana-only API) | `none` (Solana-only API) |
+| Concept         | OKX-style source         | DFlow                    |
+| --------------- | ------------------------ | ------------------------ |
+| Input token     | `fromTokenAddress`       | `inputMint`              |
+| Output token    | `toTokenAddress`         | `outputMint`             |
+| Amount          | `amount`                 | `amount`                 |
+| Swapper wallet field | `userWalletAddress`  | `userPublicKey`          |
+| Slippage field  | `slippage`               | `slippageBps`            |
+| Chain selectors | `chainId` / `chainIndex` | `none` (Solana-only API) |
 
-### `executeOrder` inputs
+`slippageBps` is optional on DFlow — it defaults to `"auto"` and determines slippage tolerance
+itself if omitted. Forwarding a converted value from the OKX-style source is only necessary if
+you want to preserve manual control the caller already had.
 
-| Concept                      | OKX-style source                    | DFlow Imperative    | DFlow Declarative                               |
-| ---------------------------- | ----------------------------------- | ------------------- | ----------------------------------------------- |
-| Signed payload field         | provider-specific tx payload        | `signedTransaction` | `signedOpenTransaction`                         |
-| Additional correlation field | provider request/trace id           | `none`              | `quoteResponse`/`intent` context in submit body |
-| Execute target               | provider `swap`/`execute` endpoints | `Solana RPC`        | `DFlow API`                                     |
+### Submitting the signed transaction
 
-## OKX -> DFlow imperative trades
+| Concept                      | OKX-style source                    | DFlow                |
+| ----------------------------- | ------------------------------------ | ------------------- |
+| Signed payload field         | provider-specific tx payload        | `signedTransaction` |
+| Additional correlation field | provider request/trace id           | `none`              |
+| Confirmation                 | handled by the provider's `swap`/`execute` endpoint | your responsibility — poll `getSignatureStatuses` yourself |
 
-1. Keep your existing flow shape: `getOrder` -> sign -> `executeOrder`.
-2. In `getOrder`, replace OKX quote/swap calls with DFlow `GET /order`.
-3. Replace fields: `fromTokenAddress` -> `inputMint`, `toTokenAddress` -> `outputMint`, `userWalletAddress` -> `userPublicKey`, `slippage` -> `slippageBps`.
-4. Keep signing with `VersionedTransaction`, because `/order` returns `transaction`.
-5. Replace provider execute/status calls with `sendRawTransaction` + `confirmTransaction` on your RPC.
-6. Replace provider request-id polling with signature-based confirm/retry handling.
+Where it lands: the OKX-style source submits to provider `swap`/`execute` endpoints, which broadcast,
+confirm, and report back status for you. DFlow returns the transaction to you unbroadcast — you
+submit it to your own Solana RPC and poll for confirmation yourself.
 
-## OKX -> DFlow declarative trades
+## OKX -> DFlow
 
-1. Keep your existing flow shape: `getOrder` -> sign -> `executeOrder`.
-2. In `getOrder`, replace OKX quote/swap calls with DFlow `GET /intent`.
-3. Replace fields: `fromTokenAddress` -> `inputMint`, `toTokenAddress` -> `outputMint`, `userWalletAddress` -> `userPublicKey`, `slippage` -> `slippageBps`.
-4. Update signing logic to use `openTransaction` from `/intent` (`Transaction.from(...)`).
-5. Replace provider execute/status calls with `POST /submit-intent` using `quoteResponse` + `signedOpenTransaction`.
-6. Replace provider request-id polling with order-metadata tracking (`orderAddress`, `programId`) and lifecycle follow-up.
+1. Keep your existing flow shape: request a quote, sign the returned transaction, submit it.
+2. Replace OKX quote/swap calls with DFlow `GET /order`.
+3. Replace `fromTokenAddress` with `inputMint`.
+4. Replace `toTokenAddress` with `outputMint`.
+5. Replace `userWalletAddress` with `userPublicKey`.
+6. Replace `slippage` with `slippageBps` — convert percentage to basis points (`0.5` = 0.5% becomes `50`).
+7. Sign the returned transaction — `VersionedTransaction` for v0 (what you get if
+   `transactionVersion` is omitted), or `@solana/kit` if you pass `transactionVersion=v1`.
+8. Replace provider execute/status calls with your own RPC submission (`sendRawTransaction` for v0,
+   kit's send helpers for v1).
+9. Add your own confirmation polling: replace provider request-id polling with a
+   `getSignatureStatuses` poll against `lastValidBlockHeight`.
+
+## Platform fees
+
+| Concept          | OKX-style source                                                | DFlow                                        |
+| ----------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
+| Fee rate field    | `feePercent` (percentage string, e.g. `"1.5"`)                   | `platformFeeBps` (basis points, e.g. `150`)     |
+| Fee account field | `fromTokenReferrerWalletAddress` / `toTokenReferrerWalletAddress` | `feeAccount`                                    |
+| Side selector     | pick one of the two referrer-wallet fields above                 | `platformFeeMode` (`inputMint`/`outputMint`)   |
+| Rate limit        | up to 10% on Solana, 3% on other chains                           | not fixed at a specific cap in the docs         |
+
+## OKX -> DFlow platform fees
+
+1. Convert `feePercent` to basis points for `platformFeeBps` (e.g. `"1.5"` -> `150`).
+2. Replace whichever of `fromTokenReferrerWalletAddress`/`toTokenReferrerWalletAddress` you used
+   with a single `feeAccount`.
+3. Set `platformFeeMode` to match the side you were collecting on (`inputMint` if you used the
+   `fromToken` field, `outputMint` if you used the `toToken` field).
+4. `feeAccount` must already exist before the swap executes, same requirement as the OKX-style
+   referrer wallet fields.
 
 ## Common migration mistakes
 
 - Keeping `chainId`/`chainIndex` in request builders after moving to DFlow Solana APIs.
-- Forgetting to convert `slippage` semantics to `slippageBps`.
+- Forgetting to convert `slippage` semantics to `slippageBps` when you do forward an explicit value.
+- Assuming DFlow requires `slippageBps` on every request — it's optional and defaults to `"auto"`.
 - Mixing decimal token amounts with atomic units.
+- Forgetting to convert `feePercent` (a percentage) to `platformFeeBps` (basis points) — `"1.5"`
+  is not `1.5` bps, it's `150`.
