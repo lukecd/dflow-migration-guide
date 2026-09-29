@@ -9,11 +9,10 @@ if (mode !== "validate" && mode !== "live") {
   throw new Error(`Invalid mode "${mode}". Use "validate" or "live".`);
 }
 
+// Optional, same as Ultra: api.jup.ag accepts keyless requests at a tighter rate limit. Unlike
+// Ultra, V2 has no separate lite-api.jup.ag host for that keyless tier.
 const JUPITER_API_KEY = process.env.JUPITER_API_KEY;
-const defaultUltraBaseUrl = JUPITER_API_KEY
-  ? "https://api.jup.ag/ultra/v1"
-  : "https://lite-api.jup.ag/ultra/v1";
-const JUPITER_ULTRA_BASE_URL = process.env.JUPITER_ULTRA_BASE_URL ?? defaultUltraBaseUrl;
+const JUPITER_SWAP_V2_BASE_URL = process.env.JUPITER_SWAP_V2_BASE_URL ?? "https://api.jup.ag/swap/v2";
 const INPUT_MINT = process.env.INPUT_MINT ?? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // USDC
 const OUTPUT_MINT = process.env.OUTPUT_MINT ?? "So11111111111111111111111111111111111111112"; // SOL
 const INPUT_AMOUNT = Number(process.env.INPUT_AMOUNT ?? "100000"); // 0.1 USDC (6 decimals)
@@ -37,7 +36,10 @@ function getKeypair(activeMode: RunMode): { keypair: Keypair; isEphemeral: boole
   return { keypair: Keypair.fromSecretKey(bs58.decode(raw)), isEphemeral: false };
 }
 
-type UltraOrderResponse = {
+// Meta-Aggregator path of Swap API V2: GET /order returns a quote + assembled
+// transaction, same shape as Ultra's GET /order. The Router path
+// (GET /build + your own submission) is a separate flow, not covered here.
+type V2OrderResponse = {
   transaction?: string;
   requestId?: string;
   inAmount?: string;
@@ -46,10 +48,10 @@ type UltraOrderResponse = {
   errorMessage?: string;
 };
 
-type UltraExecuteResponse = {
+type V2ExecuteResponse = {
   status?: string;
   signature?: string;
-  code?: string;
+  code?: number;
   error?: string;
 };
 
@@ -58,12 +60,15 @@ const requestHeaders: HeadersInit = {
   ...(JUPITER_API_KEY ? { "x-api-key": JUPITER_API_KEY } : {}),
 };
 
+// `slippageBps` is intentionally omitted below — per Jupiter's own GET /order spec, "if not set,
+// Jupiter automatically determines an appropriate slippage." Pass an explicit integer (basis
+// points) as a `slippageBps` query param instead if you want manual control.
 export async function getOrder(params: {
   inputMint: string;
   outputMint: string;
   amount: number;
   taker?: string;
-}): Promise<UltraOrderResponse> {
+}): Promise<V2OrderResponse> {
   const search = new URLSearchParams({
     inputMint: params.inputMint,
     outputMint: params.outputMint,
@@ -71,10 +76,10 @@ export async function getOrder(params: {
   });
   if (params.taker) search.set("taker", params.taker);
 
-  const response = await fetch(`${JUPITER_ULTRA_BASE_URL}/order?${search.toString()}`, {
+  const response = await fetch(`${JUPITER_SWAP_V2_BASE_URL}/order?${search.toString()}`, {
     headers: requestHeaders,
   });
-  const data = (await response.json()) as UltraOrderResponse;
+  const data = (await response.json()) as V2OrderResponse;
 
   if (!response.ok) {
     throw new Error(`getOrder failed (${response.status}): ${JSON.stringify(data)}`);
@@ -85,8 +90,8 @@ export async function getOrder(params: {
 export async function executeOrder(params: {
   signedTransaction: string;
   requestId: string;
-}): Promise<UltraExecuteResponse> {
-  const response = await fetch(`${JUPITER_ULTRA_BASE_URL}/execute`, {
+}): Promise<V2ExecuteResponse> {
+  const response = await fetch(`${JUPITER_SWAP_V2_BASE_URL}/execute`, {
     method: "POST",
     headers: requestHeaders,
     body: JSON.stringify({
@@ -94,7 +99,7 @@ export async function executeOrder(params: {
       requestId: params.requestId,
     }),
   });
-  const data = (await response.json()) as UltraExecuteResponse;
+  const data = (await response.json()) as V2ExecuteResponse;
 
   if (!response.ok) {
     throw new Error(`executeOrder failed (${response.status}): ${JSON.stringify(data)}`);
@@ -104,9 +109,9 @@ export async function executeOrder(params: {
 }
 
 async function main() {
-  console.log("Jupiter swap config:");
+  console.log("Jupiter Swap API V2 config:");
   console.log("  mode:", mode);
-  console.log("  ultra api:", JUPITER_ULTRA_BASE_URL);
+  console.log("  swap v2 api:", JUPITER_SWAP_V2_BASE_URL);
   console.log("  amount:", INPUT_AMOUNT, "atomic units");
 
   const previewOrder = await getOrder({
@@ -151,6 +156,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Jupiter swap script failed:", error);
+  console.error("Jupiter Swap API V2 script failed:", error);
   process.exit(1);
 });
